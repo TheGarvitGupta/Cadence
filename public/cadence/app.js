@@ -159,9 +159,8 @@ function wordmark() {
 // The account menu's icons, drawn as lines.
 const MENU_ICONS = {
 	sync: 'M20 11a8 8 0 0 0-14.3-4.5M4 4v3.5h3.5M4 13a8 8 0 0 0 14.3 4.5M20 20v-3.5h-3.5',
-	mail: 'M4 6.5h16v11H4zM4.5 7l7.5 6 7.5-6',
+	settings: 'M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4',
 	admin: 'M4 5h16M4 12h16M4 19h16M8 3v4M15 10v4M10 17v4',
-	unlink: 'M10.5 6.5l1-1a4 4 0 0 1 5.7 5.7l-1 1M13.5 17.5l-1 1a4 4 0 0 1-5.7-5.7l1-1M4 4l16 16',
 	leave: 'M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4M15 8l4 4-4 4M19 12H9',
 };
 
@@ -191,9 +190,7 @@ function header() {
 			h('div', { class: 'sheet' },
 				!me.user.is_demo && item('sync', 'Sync now', () => act(() => api('api/sync', 'POST'))),
 				me.owner && item('admin', 'Admin', () => (location.hash = '#/admin')),
-				!me.user.is_demo && item('mail', 'Emails', () => (location.hash = '#/emails')),
-				!me.user.is_demo && me.spotify.connected && rule(),
-				!me.user.is_demo && me.spotify.connected && item('unlink', 'Disconnect Spotify', () => confirm('Disconnect Spotify? Songs already matched are kept.') && act(() => api('api/spotify', 'DELETE'))),
+				!me.user.is_demo && item('settings', 'Settings', () => (location.hash = '#/settings')),
 				rule(),
 				item('leave', me.user.is_demo ? 'Leave the demo' : 'Sign out', () => act(() => api('auth/logout', 'POST'))),
 			),
@@ -256,7 +253,7 @@ function landing() {
 				h('i', { 'aria-hidden': 'true' }, '→'),
 				step(h('b', { class: 'note-glyph', 'aria-hidden': 'true' }, '♪'), 'Run with music'),
 			),
-			h('p', { class: 'fine' }, 'Read-only. Delete everything any time. Spotify access is by invitation: sign in, then ask for a spot.'),
+			h('p', { class: 'fine' }, 'Adds your songs to your Strava descriptions, which you can turn off. Delete everything any time in Settings. Spotify access is by invitation: sign in, then ask for a spot.'),
 		),
 	);
 }
@@ -282,7 +279,7 @@ function askForAccess() {
 
 const EMAIL_NOTES = {
 	confirmed: ['Email confirmed.', 'Your updates start with your next run or ride.'],
-	off: ['Emails turned off.', 'You won’t hear from Cadence again unless you turn them back on, under Emails in the account menu.'],
+	off: ['Emails turned off.', 'You won’t hear from Cadence again unless you turn them back on, under Settings in the account menu.'],
 	sundays: ['Just Sundays, then.', 'No more notes after each activity. The Sunday roundup carries on.'],
 };
 
@@ -1069,20 +1066,34 @@ function stravaSettings() {
 		? 'Strava no longer lets Cadence write to your activities. Turn this on again to give permission.'
 		: d.on
 			? 'After each run or ride with music, Cadence adds the song you went fastest to and a link back here, under anything you wrote.'
-			: 'Add the song you went fastest to, and a link back to Cadence, to each new run or ride with music. Strava will ask for permission to edit your activities.';
+			: 'Add the song you went fastest to, and a link back to Cadence, to each new run or ride with music. Strava will ask again for permission to edit your activities.';
 	return h('div', { class: 'card settings' },
 		h('p', null, h('strong', null, 'On Strava'), status),
 		h('div', { class: 'switches' }, h('label', { class: 'switch' }, h('span', null, 'Songs in the description'), box)),
 	);
 }
 
-function emailsPage() {
+/** The account itself: Spotify's connection, and deleting everything. */
+function accountSettings() {
+	const { me } = state;
+	if (me.user.is_demo) return null;
+	return h('div', { class: 'card settings' },
+		h('p', null, h('strong', null, 'Account'), 'Disconnecting Spotify keeps the songs already matched. Deleting your account removes everything Cadence has stored about you and disconnects Strava and Spotify.'),
+		h('div', { class: 'actions' },
+			me.spotify.connected && h('button', { class: 'btn small', type: 'button', onclick: () => confirm('Disconnect Spotify? Songs already matched are kept.') && act(() => api('api/spotify', 'DELETE')) }, 'Disconnect Spotify'),
+			h('button', { class: 'btn small danger', type: 'button', onclick: () => confirm('Delete your account and everything Cadence has stored about you? This cannot be undone.') && act(() => api('api/account', 'DELETE')) }, 'Delete my account'),
+		),
+	);
+}
+
+function settingsPage() {
 	return h('div', { class: 'wrap' },
 		header(),
-		h('h1', { class: 'title' }, 'Emails'),
-		h('p', { class: 'when' }, 'Where Cadence sends your updates, how often, and what it adds on Strava.'),
+		h('h1', { class: 'title' }, 'Settings'),
+		h('p', { class: 'when' }, 'Your emails, what Cadence adds on Strava, and your account.'),
 		emailSettings(),
 		stravaSettings(),
+		accountSettings(),
 		footer(),
 	);
 }
@@ -1234,7 +1245,8 @@ function render(keepScroll) {
 	if (state.me.email.required) return app.replaceChildren(emailGate());
 	const run = location.hash.match(/^#\/run\/(\d+)$/);
 	if (run) return runPage(run[1]);
-	if (location.hash === '#/emails' && !state.me.user.is_demo) return app.replaceChildren(emailsPage());
+	// #/emails is the page's old name, still in emails already sent.
+	if ((location.hash === '#/settings' || location.hash === '#/emails') && !state.me.user.is_demo) return app.replaceChildren(settingsPage());
 	if (location.hash === '#/admin' && state.me.owner) return app.replaceChildren(adminPage());
 	const activity = location.hash.match(/^#\/activity\/(-?\d+)$/);
 	const wasOpen = state.openActivity != null;

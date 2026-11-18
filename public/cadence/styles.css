@@ -203,6 +203,9 @@ section > .sub { color: var(--ink-2); margin: 2px 0 14px; }
 .settings p { margin: 0; color: var(--ink-2); }
 .settings strong { display: block; color: var(--ink); }
 .settings .btn { justify-self: start; }
+.settings .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn.danger { color: var(--slower); border-color: color-mix(in srgb, var(--slower) 35%, var(--border)); }
+.btn.danger:hover { background: color-mix(in srgb, var(--slower) 10%, transparent); }
 .mail { border: 1px solid var(--border); border-radius: 16px; background: var(--surface); overflow: hidden; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.14); }
 .mail-bar { display: flex; align-items: center; gap: 12px; padding: 12px 14px; }
 .lights { display: inline-flex; gap: 8px; margin-right: 4px; }

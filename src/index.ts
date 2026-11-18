@@ -13,7 +13,7 @@ import { Env, getCookie, json, now, randomToken, recast, redirect, setCookie, sh
 
 const SESSION_COOKIE = 'cadence_sid';
 const STATE_COOKIE = 'cadence_oauth';
-// Set while a sign-in asks Strava for permission to write descriptions.
+// Set while a sign-in comes from turning on songs in Strava descriptions in Settings.
 const WRITE_COOKIE = 'cadence_write';
 const SESSION_TTL = 30 * 86400;
 const DEMO_ATHLETE_ID = -1;
@@ -50,7 +50,7 @@ function authStart(req: Request, env: Env, provider: Provider, write = false): R
     return redirect(url.toString());
   }
   const state = randomToken(16);
-  return redirect(authorizeUrl(env, provider, callbackUrl(req, env, provider), state, write), [
+  return redirect(authorizeUrl(env, provider, callbackUrl(req, env, provider), state), [
     setCookie(req, env, STATE_COOKIE, state, 600),
     setCookie(req, env, WRITE_COOKIE, write ? '1' : '', write ? 600 : 0),
   ]);
@@ -77,15 +77,16 @@ async function stravaCallback(req: Request, env: Env, ctx: ExecutionContext): Pr
 
   const t = await exchangeStravaCode(env, r.code);
   const name = [t.athlete.firstname, t.athlete.lastname].filter(Boolean).join(' ') || 'Runner';
+  // Songs in the description start on for someone new, if Strava granted write.
   const user = await env.DB.prepare(
-    `INSERT INTO users (strava_athlete_id, name, avatar, created_at) VALUES (?, ?, ?, ?)
+    `INSERT INTO users (strava_athlete_id, name, avatar, created_at, strava_descriptions, strava_descriptions_since) VALUES (?1, ?2, ?3, ?4, ?5, ?4)
      ON CONFLICT (strava_athlete_id) DO UPDATE SET name = excluded.name, avatar = excluded.avatar
-     RETURNING id, strava_descriptions`,
+     RETURNING id`,
   )
-    .bind(t.athlete.id, name, t.athlete.profile_medium ?? null, now())
-    .first<{ id: number; strava_descriptions: number }>();
+    .bind(t.athlete.id, name, t.athlete.profile_medium ?? null, now(), write ? 1 : 0)
+    .first<{ id: number }>();
   await saveTokens(env, user!.id, 'strava', t);
-  // Strava grants what each sign-in asks for. Asking for descriptions turns them on, or off if the box was unticked.
+  // Strava grants what the athlete leaves ticked. Coming from the Settings switch turns descriptions on, or off if write was unticked.
   await env.DB.prepare(
     `UPDATE users SET strava_write = ?1,
        strava_descriptions = CASE WHEN ?2 THEN ?1 ELSE strava_descriptions END,
@@ -94,10 +95,6 @@ async function stravaCallback(req: Request, env: Env, ctx: ExecutionContext): Pr
   )
     .bind(write ? 1 : 0, askedWrite ? 1 : 0, now(), user!.id)
     .run();
-  const session = await startSession(req, env, user!.id);
-  const cleared = [setCookie(req, env, STATE_COOKIE, '', 0), setCookie(req, env, WRITE_COOKIE, '', 0)];
-  // A plain sign-in by someone with descriptions on asks for less than they had: go round again for write, once.
-  if (!askedWrite && !write && user!.strava_descriptions) return redirect(`${env.BASE_PATH}/auth/strava?write=1`, [session, ...cleared]);
   // Permissions may have changed, so fetch the past week's detailed data afresh.
   await env.DB.prepare(
     `UPDATE activities SET stream_state = 'pending', stream_tries = 0 WHERE user_id = ? AND start_time > ?`,
@@ -105,7 +102,11 @@ async function stravaCallback(req: Request, env: Env, ctx: ExecutionContext): Pr
     .bind(user!.id, now() - 7 * 86400)
     .run();
   ctx.waitUntil(syncUser(env, user!.id, { n: 20 }, { strava: true }).catch(console.error));
-  return redirect(askedWrite ? `${env.BASE_PATH}/#/emails` : `${env.BASE_PATH}/`, [session, ...cleared]);
+  return redirect(askedWrite ? `${env.BASE_PATH}/#/settings` : `${env.BASE_PATH}/`, [
+    await startSession(req, env, user!.id),
+    setCookie(req, env, STATE_COOKIE, '', 0),
+    setCookie(req, env, WRITE_COOKIE, '', 0),
+  ]);
 }
 
 async function spotifyCallback(req: Request, env: Env, user: User, ctx: ExecutionContext): Promise<Response> {

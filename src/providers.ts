@@ -8,10 +8,10 @@ export type Provider = 'strava' | 'spotify';
 // Strava: profile + activities. `activity:read_all` is needed for complete
 // data: with plain `activity:read`, Strava cuts out the stretches of every
 // activity that fall inside the athlete's hidden start/end zones.
+// `activity:write` puts the songs in each activity's description; Strava lets
+// the athlete untick it, and Cadence then only reads.
 // Spotify: listening history.
-const STRAVA_SCOPE = 'read,activity:read_all';
-// Asked for only by those who turn on songs in their Strava descriptions.
-const STRAVA_WRITE_SCOPE = `${STRAVA_SCOPE},activity:write`;
+const STRAVA_SCOPE = 'read,activity:read_all,activity:write';
 const SPOTIFY_SCOPE = 'user-read-recently-played';
 
 export const RUN_TYPES = new Set(['Run', 'TrailRun', 'VirtualRun']);
@@ -29,14 +29,14 @@ interface TokenSet {
   expires_at: number;
 }
 
-export function authorizeUrl(env: Env, provider: Provider, redirectUri: string, state: string, write = false): string {
+export function authorizeUrl(env: Env, provider: Provider, redirectUri: string, state: string): string {
   if (provider === 'strava') {
     const q = new URLSearchParams({
       client_id: env.STRAVA_CLIENT_ID,
       redirect_uri: redirectUri,
       response_type: 'code',
       approval_prompt: 'auto',
-      scope: write ? STRAVA_WRITE_SCOPE : STRAVA_SCOPE,
+      scope: STRAVA_SCOPE,
       state,
     });
     return `https://www.strava.com/oauth/authorize?${q}`;

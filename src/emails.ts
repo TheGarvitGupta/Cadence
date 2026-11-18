@@ -198,7 +198,7 @@ function links(env: Env, origin: string, user: EmailUser) {
     off: `${app}auth/email/off?t=${token}`,
     // Stops the note after each activity and keeps the Sunday roundup.
     offActivity: `${app}auth/email/off?t=${token}&only=activity`,
-    settings: `${app}#/emails`,
+    settings: `${app}#/settings`,
   };
 }
 
