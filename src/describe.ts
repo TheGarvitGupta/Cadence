@@ -20,7 +20,7 @@ interface DueRun {
 
 // One of these leads each description: listening, or the sport itself. Picked by the activity, so each one
 // wears a different mark and a retry keeps it.
-const LISTENING = ['🎧', '🎵', '🎶', '🔊', '📻'];
+const LISTENING = ['🎧', '🎵', '🎶', '🔊'];
 const MARKS: Record<Sport, string[]> = {
   run: [...LISTENING, '🏃', '🏃‍♀️', '👟'],
   ride: [...LISTENING, '🚴', '🚴‍♀️', '🚲'],
