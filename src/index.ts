@@ -307,7 +307,7 @@ async function recent(env: Env, user: User) {
     }
     withSongs.push({ ...a, songs });
   }
-  return { songs: intervals.reverse().map((i) => describe(i)), activities: withSongs };
+  return { activities: withSongs };
 }
 
 async function handleStravaWebhook(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {

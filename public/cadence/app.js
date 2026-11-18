@@ -741,7 +741,7 @@ function latest(fmt) {
 		state.filter = new Set([state.sport]);
 		state.filterFor = state.sport;
 	}
-	const { me, recent, filter } = state;
+	const { recent, filter } = state;
 	const open = recent.activities.find((a) => a.id === state.openActivity);
 
 	const activity = (a) =>
@@ -752,13 +752,6 @@ function latest(fmt) {
 				h('div', { class: 'meta' }, h('span', null, `${kind(a)} · ${duration(a.elapsed_s)}`), songsPill(a.songs)),
 			),
 			h('span', { class: 'go', 'aria-hidden': 'true' }, '›'),
-		));
-
-	const song = (s) =>
-		h('li', null, h('div', { class: 'row' },
-			art(s.image, s.name, true),
-			h('div', { class: 'who' }, h('b', null, s.name), h('span', null, s.artist)),
-			h('span', { class: 'at' }, `${dayName(s.to)}, ${clockTime(s.to)} · ${minSec(s.to - s.from)}`),
 		));
 
 	// The Strava card: its list, the count beside the chip, and the filter with its menu.
@@ -803,12 +796,8 @@ function latest(fmt) {
 	return h('section', { id: 'latest' },
 		h('h2', null, 'Activity'),
 		h('p', { class: 'sub' }, 'Open an activity to see what was playing during it.'),
-		h('div', { class: 'pair' },
-				h('div', { class: 'card' }, h('div', { class: 'card-head' }, chips.strava, count, h('div', { class: 'filter-box' }, toggle, menu)), listed),
-				h('div', { class: 'card' },
-					h('div', { class: 'card-head' }, chips.spotify, h('span', { class: 'count' }, plural(recent.songs.length, 'song'))),
-					rows(recent.songs, song, me.spotify.connected ? 'No songs yet. Play something and check back in a few minutes.' : 'Connect Spotify to see your songs here.')),
-			),
+		// One list: each activity carries the songs heard during it. Both connections sit at its head.
+		h('div', { class: 'card' }, h('div', { class: 'card-head' }, chips.strava, chips.spotify, count, h('div', { class: 'filter-box' }, toggle, menu)), listed),
 	);
 }
 
