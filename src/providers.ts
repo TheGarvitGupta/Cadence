@@ -10,6 +10,8 @@ export type Provider = 'strava' | 'spotify';
 // activity that fall inside the athlete's hidden start/end zones.
 // Spotify: listening history.
 const STRAVA_SCOPE = 'read,activity:read_all';
+// Asked for only by those who turn on songs in their Strava descriptions.
+const STRAVA_WRITE_SCOPE = `${STRAVA_SCOPE},activity:write`;
 const SPOTIFY_SCOPE = 'user-read-recently-played';
 
 export const RUN_TYPES = new Set(['Run', 'TrailRun', 'VirtualRun']);
@@ -27,14 +29,14 @@ interface TokenSet {
   expires_at: number;
 }
 
-export function authorizeUrl(env: Env, provider: Provider, redirectUri: string, state: string): string {
+export function authorizeUrl(env: Env, provider: Provider, redirectUri: string, state: string, write = false): string {
   if (provider === 'strava') {
     const q = new URLSearchParams({
       client_id: env.STRAVA_CLIENT_ID,
       redirect_uri: redirectUri,
       response_type: 'code',
       approval_prompt: 'auto',
-      scope: STRAVA_SCOPE,
+      scope: write ? STRAVA_WRITE_SCOPE : STRAVA_SCOPE,
       state,
     });
     return `https://www.strava.com/oauth/authorize?${q}`;
@@ -193,6 +195,31 @@ export async function stravaStreams(token: string, activityId: number, budget: B
     cadence: s.cadence?.data as number[] | undefined,
     altitude: s.altitude?.data as number[] | undefined,
   };
+}
+
+/**
+ * An activity's description, or 'gone' if it was deleted, or 'denied' if the
+ * token may no longer touch it (the athlete took back permission).
+ */
+export async function stravaDescription(token: string, activityId: number, budget: Budget): Promise<string | 'gone' | 'denied'> {
+  const res = await outbound(budget, `https://www.strava.com/api/v3/activities/${activityId}`, { headers: { authorization: `Bearer ${token}` } });
+  if (res.status === 404) return 'gone';
+  if (res.status === 401 || res.status === 403) return 'denied';
+  if (!res.ok) throw new Error(`Strava activity failed (${res.status})`);
+  return ((await res.json()) as { description?: string | null }).description ?? '';
+}
+
+/** Replaces an activity's description. Needs activity:write. */
+export async function setStravaDescription(token: string, activityId: number, description: string, budget: Budget): Promise<'ok' | 'gone' | 'denied'> {
+  const res = await outbound(budget, `https://www.strava.com/api/v3/activities/${activityId}`, {
+    method: 'PUT',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ description }),
+  });
+  if (res.status === 404) return 'gone';
+  if (res.status === 401 || res.status === 403) return 'denied';
+  if (!res.ok) throw new Error(`Strava activity update failed (${res.status})`);
+  return 'ok';
 }
 
 export async function stravaDeauthorize(token: string): Promise<void> {

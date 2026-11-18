@@ -56,7 +56,7 @@ export interface EmailUser extends User {
 const esc = (v: unknown) =>
   String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
-function units(unit: string) {
+export function units(unit: string) {
   const metres = unit === 'mi' ? 1609.344 : 1000;
   const per = unit === 'mi' ? 'mph' : 'km/h';
   return {
@@ -507,6 +507,27 @@ interface ActivitySong {
   image: string | null;
 }
 
+/**
+ * Each song once, as on the app: a song that played more than once has its plays added together. Fastest first.
+ * The fastest song had a minute or more of moving, so a few seconds at a light don't win it.
+ */
+export function rankSongs<T extends { name: string; artist: string; image: string | null; start_s: number; end_s: number; distance_m: number; moving_s: number }>(songs: T[]) {
+  const bySong = new Map<string, { name: string; artist: string; image: string | null; plays: number; seconds: number; distance: number; moving: number }>();
+  for (const x of songs) {
+    const key = `${x.name}|${x.artist}`;
+    const r = bySong.get(key) ?? { name: x.name, artist: x.artist, image: x.image, plays: 0, seconds: 0, distance: 0, moving: 0 };
+    r.plays++;
+    r.seconds += x.end_s - x.start_s;
+    r.distance += x.distance_m;
+    r.moving += x.moving_s;
+    bySong.set(key, r);
+  }
+  const ranked = [...bySong.values()]
+    .map((r) => ({ ...r, speed: r.moving >= 5 && r.distance > 0 ? r.distance / r.moving : null }))
+    .sort((a, b) => (b.speed ?? -1) - (a.speed ?? -1));
+  return { ranked, fastest: ranked.find((r) => r.speed && r.moving >= 60) ?? null };
+}
+
 // Songs listed in full before the rest are left to the site.
 const SONGS_LISTED = 25;
 
@@ -552,22 +573,7 @@ async function activity(env: Env, origin: string, user: EmailUser, unit: string,
       : { distance_m: run.distance_m, moving_s: run.moving_s };
   const average = whole.distance_m / Math.max(1, whole.moving_s);
 
-  // Each song once, as on the app: a song that played more than once has its plays added together. Fastest first.
-  const bySong = new Map<string, { name: string; artist: string; image: string | null; plays: number; seconds: number; distance: number; moving: number }>();
-  for (const x of songs) {
-    const key = `${x.name}|${x.artist}`;
-    const r = bySong.get(key) ?? { name: x.name, artist: x.artist, image: x.image, plays: 0, seconds: 0, distance: 0, moving: 0 };
-    r.plays++;
-    r.seconds += x.end_s - x.start_s;
-    r.distance += x.distance_m;
-    r.moving += x.moving_s;
-    bySong.set(key, r);
-  }
-  const ranked = [...bySong.values()]
-    .map((r) => ({ ...r, speed: r.moving >= 5 && r.distance > 0 ? r.distance / r.moving : null }))
-    .sort((a, b) => (b.speed ?? -1) - (a.speed ?? -1));
-  // The fastest song had a minute or more of moving, so a few seconds at a light don't win it.
-  const fastest = ranked.find((r) => r.speed && r.moving >= 60) ?? null;
+  const { ranked, fastest } = rankSongs(songs);
   // How many songs, and how many plays when some came round again.
   const songCount = `${plural(ranked.length, 'song')}${songs.length > ranked.length ? ` (${songs.length} plays)` : ''}`;
   const ins = await buildInsights(env, user, s);
@@ -798,7 +804,7 @@ export async function sendWeekly(env: Env, origin: string): Promise<void> {
 }
 
 // Songs land with Spotify when they finish and are fetched every ten minutes, so a run is written up this long after it ends.
-const SETTLE_S = 20 * 60;
+export const SETTLE_S = 20 * 60;
 
 /** Cron step: the note after each run or ride with music, once each, to those who asked for it. One at a time: each may fetch a few dozen covers. */
 export async function sendActivityEmails(env: Env, origin: string): Promise<void> {

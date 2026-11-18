@@ -96,6 +96,11 @@ async function load() {
 	try {
 		state.me = await api('api/me');
 		if (!unitsChosen && state.me.units) state.units = state.me.units;
+		// Back to the page a link was opened on before signing in (the activity link in a Strava description).
+		try {
+			const back = sessionStorage.getItem('cadence_return');
+			if (back) sessionStorage.removeItem('cadence_return'), history.replaceState(null, '', location.pathname + back);
+		} catch {}
 	} catch (err) {
 		if (err.status !== 401) return fail(err);
 		state.me = null;
@@ -211,6 +216,10 @@ const ERRORS = {
 };
 
 function landing() {
+	// Signing in goes through Strava and loses the #; remember it, so a link to an activity still lands there.
+	try {
+		if (location.hash.startsWith('#/activity/')) sessionStorage.setItem('cadence_return', location.hash);
+	} catch {}
 	const error = ERRORS[new URLSearchParams(location.search).get('error')];
 	if (error) history.replaceState(null, '', location.pathname);
 	const logo = (name) => svg('svg', { class: `mark ${name}`, viewBox: '0 0 24 24', 'aria-hidden': 'true' }, svg('path', { d: MARKS[name] }));
@@ -1049,12 +1058,34 @@ function emailSettings() {
 	);
 }
 
+/** Songs in the Strava description: a switch. Turning it on goes through Strava once, for permission to write. */
+function stravaSettings() {
+	const { me } = state;
+	if (me.user.is_demo) return null;
+	const d = me.strava_descriptions;
+	const box = h('input', { type: 'checkbox', role: 'switch', checked: d.on && d.write });
+	box.onchange = () => {
+		if (box.checked && !d.write) return void (location.href = 'auth/strava?write=1');
+		act(() => api('api/strava-descriptions', 'POST', { on: box.checked }));
+	};
+	const status = d.on && !d.write
+		? 'Strava no longer lets Cadence write to your activities. Turn this on again to give permission.'
+		: d.on
+			? 'After each run or ride with music, Cadence adds the song you went fastest to and a link back here, under anything you wrote.'
+			: 'Add the song you went fastest to, and a link back to Cadence, to each new run or ride with music. Strava will ask for permission to edit your activities.';
+	return h('div', { class: 'card settings' },
+		h('p', null, h('strong', null, 'On Strava'), status),
+		h('div', { class: 'switches' }, h('label', { class: 'switch' }, h('span', null, 'Songs in the description'), box)),
+	);
+}
+
 function emailsPage() {
 	return h('div', { class: 'wrap' },
 		header(),
 		h('h1', { class: 'title' }, 'Emails'),
-		h('p', { class: 'when' }, 'Where Cadence sends your updates, and how often.'),
+		h('p', { class: 'when' }, 'Where Cadence sends your updates, how often, and what it adds on Strava.'),
 		emailSettings(),
+		stravaSettings(),
 		footer(),
 	);
 }

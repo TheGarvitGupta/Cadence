@@ -7,11 +7,14 @@ import { SongInterval, songIntervals } from './match';
 import { accessToken, authorizeUrl, exchangeSpotifyCode, exchangeStravaCode, Provider, saveTokens, Sport, stravaDeauthorize } from './providers';
 import { servePin } from './covers';
 import { serveMap } from './staticmap';
+import { describeActivities } from './describe';
 import { syncAll, syncUser } from './sync';
 import { Env, getCookie, json, now, randomToken, recast, redirect, setCookie, sha256Hex, User } from './util';
 
 const SESSION_COOKIE = 'cadence_sid';
 const STATE_COOKIE = 'cadence_oauth';
+// Set while a sign-in asks Strava for permission to write descriptions.
+const WRITE_COOKIE = 'cadence_write';
 const SESSION_TTL = 30 * 86400;
 const DEMO_ATHLETE_ID = -1;
 // The schedule the emails go out on; it must match the second cron in wrangler.jsonc.
@@ -39,7 +42,7 @@ function callbackUrl(req: Request, env: Env, provider: Provider): string {
   return `${new URL(req.url).origin}${env.BASE_PATH}/auth/${provider}/callback`;
 }
 
-function authStart(req: Request, env: Env, provider: Provider): Response {
+function authStart(req: Request, env: Env, provider: Provider, write = false): Response {
   const url = new URL(req.url);
   if (url.hostname === 'localhost') {
     // Spotify only accepts the loopback IP for local redirect URIs.
@@ -47,7 +50,10 @@ function authStart(req: Request, env: Env, provider: Provider): Response {
     return redirect(url.toString());
   }
   const state = randomToken(16);
-  return redirect(authorizeUrl(env, provider, callbackUrl(req, env, provider), state), [setCookie(req, env, STATE_COOKIE, state, 600)]);
+  return redirect(authorizeUrl(env, provider, callbackUrl(req, env, provider), state, write), [
+    setCookie(req, env, STATE_COOKIE, state, 600),
+    setCookie(req, env, WRITE_COOKIE, write ? '1' : '', write ? 600 : 0),
+  ]);
 }
 
 /** Checks the OAuth round trip and returns the code, or a redirect explaining what went wrong. */
@@ -64,19 +70,34 @@ function authReturn(req: Request, env: Env): { code: string } | Response {
 async function stravaCallback(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const r = authReturn(req, env);
   if (r instanceof Response) return r;
-  const scope = new URL(req.url).searchParams.get('scope') ?? '';
-  if (!scope.split(',').some((s) => s.startsWith('activity:read'))) return redirect(`${env.BASE_PATH}/?error=scope`);
+  const scope = (new URL(req.url).searchParams.get('scope') ?? '').split(',');
+  if (!scope.some((s) => s.startsWith('activity:read'))) return redirect(`${env.BASE_PATH}/?error=scope`);
+  const askedWrite = getCookie(req, WRITE_COOKIE) === '1';
+  const write = scope.includes('activity:write');
 
   const t = await exchangeStravaCode(env, r.code);
   const name = [t.athlete.firstname, t.athlete.lastname].filter(Boolean).join(' ') || 'Runner';
   const user = await env.DB.prepare(
     `INSERT INTO users (strava_athlete_id, name, avatar, created_at) VALUES (?, ?, ?, ?)
      ON CONFLICT (strava_athlete_id) DO UPDATE SET name = excluded.name, avatar = excluded.avatar
-     RETURNING id`,
+     RETURNING id, strava_descriptions`,
   )
     .bind(t.athlete.id, name, t.athlete.profile_medium ?? null, now())
-    .first<{ id: number }>();
+    .first<{ id: number; strava_descriptions: number }>();
   await saveTokens(env, user!.id, 'strava', t);
+  // Strava grants what each sign-in asks for. Asking for descriptions turns them on, or off if the box was unticked.
+  await env.DB.prepare(
+    `UPDATE users SET strava_write = ?1,
+       strava_descriptions = CASE WHEN ?2 THEN ?1 ELSE strava_descriptions END,
+       strava_descriptions_since = CASE WHEN ?2 AND ?1 AND NOT strava_descriptions THEN ?3 ELSE strava_descriptions_since END
+     WHERE id = ?4`,
+  )
+    .bind(write ? 1 : 0, askedWrite ? 1 : 0, now(), user!.id)
+    .run();
+  const session = await startSession(req, env, user!.id);
+  const cleared = [setCookie(req, env, STATE_COOKIE, '', 0), setCookie(req, env, WRITE_COOKIE, '', 0)];
+  // A plain sign-in by someone with descriptions on asks for less than they had: go round again for write, once.
+  if (!askedWrite && !write && user!.strava_descriptions) return redirect(`${env.BASE_PATH}/auth/strava?write=1`, [session, ...cleared]);
   // Permissions may have changed, so fetch the past week's detailed data afresh.
   await env.DB.prepare(
     `UPDATE activities SET stream_state = 'pending', stream_tries = 0 WHERE user_id = ? AND start_time > ?`,
@@ -84,7 +105,7 @@ async function stravaCallback(req: Request, env: Env, ctx: ExecutionContext): Pr
     .bind(user!.id, now() - 7 * 86400)
     .run();
   ctx.waitUntil(syncUser(env, user!.id, { n: 20 }, { strava: true }).catch(console.error));
-  return redirect(`${env.BASE_PATH}/`, [await startSession(req, env, user!.id), setCookie(req, env, STATE_COOKIE, '', 0)]);
+  return redirect(askedWrite ? `${env.BASE_PATH}/#/emails` : `${env.BASE_PATH}/`, [session, ...cleared]);
 }
 
 async function spotifyCallback(req: Request, env: Env, user: User, ctx: ExecutionContext): Promise<Response> {
@@ -166,6 +187,8 @@ async function me(env: Env, user: User) {
     owner: isOwner(env, user),
     // Whether they have already asked the owner to be added to Spotify.
     access_requested: !!asked,
+    // Songs in the Strava description: asked for, and whether Strava still lets Cadence write them.
+    strava_descriptions: { on: !!(user as EmailUser & { strava_descriptions?: number }).strava_descriptions, write: !!(user as User & { strava_write?: number }).strava_write },
     email: {
       available: canSend(env),
       address: e.email ?? null,
@@ -358,7 +381,10 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   // Anything that changes state must come from our own pages.
   if (method !== 'GET' && req.headers.get('origin') !== url.origin) return json({ error: 'bad origin' }, 403);
 
-  if (path === '/auth/strava' && method === 'GET') return authStart(req, env, 'strava');
+  if (path === '/auth/strava' && method === 'GET') return authStart(req, env, 'strava', url.searchParams.get('write') === '1');
+  // The short link in Strava descriptions: opens that run or ride in the app (after signing in, if need be).
+  const short = path.match(/^\/a\/(-?\d+)$/);
+  if (short && method === 'GET') return redirect(`${env.BASE_PATH}/#/activity/${short[1]}`);
   if (path === '/auth/strava/callback') return stravaCallback(req, env, ctx);
 
   if (path === '/auth/demo' && method === 'POST') {
@@ -513,6 +539,20 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     return json({ ok: true });
   }
 
+  // Turning songs in Strava descriptions on goes through Strava when it has not granted write; off just stops them.
+  if (path === '/api/strava-descriptions' && method === 'POST') {
+    const on = !!((await req.json().catch(() => ({}))) as { on?: boolean }).on;
+    const u = user as User & { strava_write: number };
+    if (on && !u.strava_write) return json({ error: 'Strava has not given permission yet.' }, 409);
+    await env.DB.prepare(
+      `UPDATE users SET strava_descriptions = ?1,
+         strava_descriptions_since = CASE WHEN ?1 AND NOT strava_descriptions THEN ?2 ELSE strava_descriptions_since END WHERE id = ?3`,
+    )
+      .bind(on ? 1 : 0, now(), user.id)
+      .run();
+    return json({ ok: true });
+  }
+
   if (path === '/api/sync' && method === 'POST') {
     if (now() - (user.last_sync_at ?? 0) < 60) return json({ error: 'Synced a moment ago. Try again in a minute.' }, 429);
     await syncUser(env, user.id, { n: 20 }, { strava: true });
@@ -552,6 +592,7 @@ export default {
       const origin = env.PUBLIC_ORIGIN ?? 'https://www.garvitgupta.com';
       ctx.waitUntil(sendWeekly(env, origin).catch(console.error));
       ctx.waitUntil(sendActivityEmails(env, origin).catch(console.error));
+      ctx.waitUntil(describeActivities(env, origin).catch(console.error));
     } else {
       ctx.waitUntil(syncAll(env));
     }
