@@ -163,7 +163,6 @@ const MENU_ICONS = {
 	admin: 'M4 5h16M4 12h16M4 19h16M8 3v4M15 10v4M10 17v4',
 	unlink: 'M10.5 6.5l1-1a4 4 0 0 1 5.7 5.7l-1 1M13.5 17.5l-1 1a4 4 0 0 1-5.7-5.7l1-1M4 4l16 16',
 	leave: 'M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4M15 8l4 4-4 4M19 12H9',
-	trash: 'M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12M10.5 10.5v5.5M13.5 10.5v5.5',
 };
 
 function header() {
@@ -197,8 +196,6 @@ function header() {
 				!me.user.is_demo && me.spotify.connected && item('unlink', 'Disconnect Spotify', () => confirm('Disconnect Spotify? Songs already matched are kept.') && act(() => api('api/spotify', 'DELETE'))),
 				rule(),
 				item('leave', me.user.is_demo ? 'Leave the demo' : 'Sign out', () => act(() => api('auth/logout', 'POST'))),
-				!me.user.is_demo && rule(),
-				!me.user.is_demo && item('trash', 'Delete my account', () => confirm('Delete your account and everything Cadence has stored about you? This cannot be undone.') && act(() => api('api/account', 'DELETE')), 'danger'),
 			),
 		),
 	);
