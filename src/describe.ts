@@ -85,9 +85,16 @@ export async function describeActivities(env: Env, origin: string): Promise<void
         await lostPermission(row.id);
         continue;
       }
-      // Already there (a write that landed before the row was marked): nothing to add.
-      if (!current.includes(activityShortLink(env, origin, row.strava_id))) {
-        const result = await setStravaDescription(token, row.strava_id, current.trim() ? `${current.trimEnd()}\n\n${lines}` : lines, budget);
+      // Cadence's own lines from before (the paragraph holding its link) give way to the new ones; the rest is left as written.
+      const link = activityShortLink(env, origin, row.strava_id);
+      const own = current
+        .split(/\n\s*\n/)
+        .filter((p) => !p.includes(link))
+        .join('\n\n')
+        .trim();
+      const next = own ? `${own}\n\n${lines}` : lines;
+      if (next !== current.trim()) {
+        const result = await setStravaDescription(token, row.strava_id, next, budget);
         if (result === 'denied') {
           await lostPermission(row.id);
           continue;
