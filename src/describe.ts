@@ -18,6 +18,9 @@ interface DueRun {
   distance_m: number;
 }
 
+// One of these leads each description, picked by the activity, so each run or ride wears a different one and a retry keeps it.
+const MARKS = ['🎧', '🎵', '🎶', '🎸', '🥁', '🎤', '🎹', '🎷', '🎺', '📻', '🪩', '💿'];
+
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 /** The lines Cadence adds, for one run or ride. */
@@ -34,9 +37,10 @@ export async function descriptionLines(env: Env, origin: string, user: User & { 
   const u = units(user.units === 'mi' || user.units === 'km' ? user.units : user.email_units === 'mi' ? 'mi' : 'km');
   const { ranked, fastest } = rankSongs(songs);
   // Led by the fastest song; without one, by how many songs there were.
+  const mark = MARKS[Math.abs(run.strava_id) % MARKS.length];
   const lead = fastest
-    ? `🎧 ${run.sport === 'ride' ? 'Rode' : 'Ran'} fastest to ${fastest.name} by ${fastest.artist} (${u.rate(fastest.speed!, run.sport)})\n`
-    : `🎧 ${plural(ranked.length, 'song')} over ${u.dist(run.distance_m)}. `;
+    ? `${mark} ${run.sport === 'ride' ? 'Rode' : 'Ran'} fastest to ${fastest.name} by ${fastest.artist} (${u.rate(fastest.speed!, run.sport)})\n`
+    : `${mark} ${plural(ranked.length, 'song')} over ${u.dist(run.distance_m)}. `;
   return `${lead}See where each song played on the map:\n${activityShortLink(env, origin, run.strava_id)}`;
 }
 
