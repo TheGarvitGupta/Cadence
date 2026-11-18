@@ -1,6 +1,6 @@
 // Songs in the Strava description. For those who turn it on, each run or ride
 // with music gets a few lines added under whatever its description already
-// says: the song they went fastest to, how many songs there were, and a link
+// says: the song they went fastest to, and a link
 // that opens the activity in Cadence. Written once, after the songs settle,
 // and never again, so later edits on Strava are left alone.
 
@@ -33,10 +33,11 @@ export async function descriptionLines(env: Env, origin: string, user: User & { 
   if (!songs.length) return null;
   const u = units(user.units === 'mi' || user.units === 'km' ? user.units : user.email_units === 'mi' ? 'mi' : 'km');
   const { ranked, fastest } = rankSongs(songs);
+  // Led by the fastest song; without one, by how many songs there were.
   const lead = fastest
-    ? `🎧 ${run.sport === 'ride' ? 'Rode' : 'Ran'} fastest to ${fastest.name} by ${fastest.artist} (${u.rate(fastest.speed!, run.sport)})\n${plural(ranked.length, 'song')} over ${u.dist(run.distance_m)}.`
-    : `🎧 ${plural(ranked.length, 'song')} over ${u.dist(run.distance_m)}.`;
-  return `${lead} See where each one played:\n${activityShortLink(env, origin, run.strava_id)}`;
+    ? `🎧 ${run.sport === 'ride' ? 'Rode' : 'Ran'} fastest to ${fastest.name} by ${fastest.artist} (${u.rate(fastest.speed!, run.sport)})\n`
+    : `🎧 ${plural(ranked.length, 'song')} over ${u.dist(run.distance_m)}. `;
+  return `${lead}See where each song played on the map:\n${activityShortLink(env, origin, run.strava_id)}`;
 }
 
 /** Cron step: writes the songs into the Strava description of each new run or ride with music, for those who asked. */
